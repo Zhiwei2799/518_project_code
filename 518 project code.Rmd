@@ -656,7 +656,4 @@ legend("topleft", legend = c("SPY500 Index", "Replicate Portfolio_SE","Replicate
 ```
 
 
-```{r}
-matrix_ksibuy
-```
 
