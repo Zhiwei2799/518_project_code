@@ -1,0 +1,915 @@
+---
+title: "Superexpectation Regression Code"
+author: "Zhiwei Lin"
+date: "2023-11-08"
+output: pdf_document
+---
+
+```{r}
+library(tidyverse)
+library(PSG)
+library(fGarch)
+```
+
+# Normal Distribution with Residual is N(0,1)
+```{r,include=FALSE}
+mse_avg_1 <- mse_min_1 <- mse_max_1 <- mse_delta_1 <- c()
+mse_avg_2 <- mse_min_2 <- mse_max_2 <- mse_delta_2 <- c()
+mse_avg_3 <- mse_min_3 <- mse_max_3 <- mse_delta_3 <- c()
+opt_sol <- c(0, 1)
+grid <-  seq(100,10000,by=100)
+
+for (N in seq(100,10000,by=100)){
+    mse_raw_1 = c()
+    mse_raw_2 = c()
+    mse_raw_3 = c()
+    for (s in 1:10){
+    set.seed(s)
+    e <- rnorm(N, mean = 0, sd = 1)  # Gaussian Noise
+    x <- rnorm(N, mean = 0, sd = 1)
+    w <- 1
+    b <- 0
+    y <- w * x + b  # y = x
+
+    # Building Design Matrices for Primal Problems
+    matrix_scenarios_body <- matrix(c(rep(1, times = N), x, y+e), ncol = 3, byrow = FALSE)
+    colnames(matrix_scenarios_body) = c('x1','x2','scenario_benchmark')
+
+
+    # Piecewise Linear Error
+    problem_name_l <- "problem_linear"
+    problem_statement_l <- sprintf("minimize
+        variable(super_err)
+        constraint: <= 0
+        pm_pen_g(0, matrix_scenarios)
+        -variable(super_err)
+        constraint: <= 0
+        pm_pen(0, matrix_scenarios)
+        -variable(super_err)
+        Solver: van")
+    problem_list_linear <- list()
+    problem_list_linear$problem_name <- problem_name_l
+    problem_list_linear$problem_statement <- problem_statement_l
+    problem_list_linear$matrix_scenarios <- matrix_scenarios_body
+
+    # Optimization Output
+    res_lin <- rpsg_solver(problem_list_linear)
+    output_list_linear <- rpsg_getsolution(res_lin)
+    coefs_lin <- output_list_linear$point_problem_1[2:3]
+
+    # Quadratic Error
+    problem_name_q <- "problem_quadratic"
+    problem_statement_q <- sprintf("minimize
+        pm2_pen(0, matrix_scenarios)
+        pm2_pen_g(0, matrix_scenarios)
+        Solver: van")
+    problem_list_q <- list()
+    problem_list_q$problem_name <- problem_name_q
+    problem_list_q$problem_statement <- problem_statement_q
+    problem_list_q$matrix_scenarios <- matrix_scenarios_body
+    # Optimization Output
+    res_q <- rpsg_solver(problem_list_q)
+    output_list_q <- rpsg_getsolution(res_q)
+    coefs_q <- output_list_q$point_problem_1
+
+    # KB Error
+    problem_name_kb <- "problem_kb"
+    problem_statement_kb <- sprintf("minimize
+        kb_err(0.5, matrix_scenarios) 
+        Solver: van")
+    problem_list_kb <- list()
+    problem_list_kb$problem_name <- problem_name_kb
+    problem_list_kb$problem_statement <- problem_statement_kb
+    problem_list_kb$matrix_scenarios <- matrix_scenarios_body
+
+    # Optimization Output
+    res_kb <- rpsg_solver(problem_list_kb)
+    output_list_kb <- rpsg_getsolution(res_kb)
+    coefs_kb <- output_list_kb$point_problem_1
+
+    mse_1 <- sqrt(sum((coefs_lin - opt_sol)^2)) / sqrt(sum(coefs_lin^2))
+    mse_raw_1 <- c(mse_raw_1, mse_1)
+    
+    mse_2 <- sqrt(sum((coefs_q - opt_sol)^2)) / sqrt(sum(coefs_q^2))
+    mse_raw_2 <- c(mse_raw_2, mse_2)
+    
+    mse_3 <- sqrt(sum((coefs_kb - opt_sol)^2)) / sqrt(sum(coefs_kb^2))
+    mse_raw_3 <- c(mse_raw_3, mse_3)
+    }
+  min_err_1 <- min(mse_raw_1)
+  max_err_1 <- max(mse_raw_1)
+  avg_err_1 <- mean(mse_raw_1)
+  delta_err_1 <- max_err_1 - min_err_1
+
+  min_err_2 <- min(mse_raw_2)
+  max_err_2 <- max(mse_raw_2)
+  avg_err_2 <- mean(mse_raw_2)
+  delta_err_2 <- max_err_2 - min_err_2
+
+  min_err_3 <- min(mse_raw_3)
+  max_err_3 <- max(mse_raw_3)
+  avg_err_3 <- mean(mse_raw_3)
+  delta_err_3 <- max_err_3 - min_err_3
+
+  mse_avg_1 <- c(mse_avg_1, avg_err_1)
+  mse_min_1 <- c(mse_min_1, min_err_1)
+  mse_max_1 <- c(mse_max_1, max_err_1)
+  mse_delta_1 <- c(mse_delta_1, delta_err_1)
+
+  mse_avg_2 <- c(mse_avg_2, avg_err_2)
+  mse_min_2 <- c(mse_min_2, min_err_2)
+  mse_max_2 <- c(mse_max_2, max_err_2)
+  mse_delta_2 <- c(mse_delta_2, delta_err_2)
+
+  mse_avg_3 <- c(mse_avg_3, avg_err_3)
+  mse_min_3 <- c(mse_min_3, min_err_3)
+  mse_max_3 <- c(mse_max_3, max_err_3)
+  mse_delta_3 <- c(mse_delta_3, delta_err_3)
+
+}
+    
+```
+
+
+```{r}
+df <- data.frame(grid = grid, Linear = mse_avg_1, Quadratic = mse_avg_2, KB = mse_avg_3)
+
+ggplot(data = df, aes(x = grid)) +
+  geom_line(aes(y = Linear, color = "SE"), linetype = "solid", size = 1) +
+  geom_line(aes(y = Quadratic, color = "MSE"), linetype = "solid", size = 1) +
+  geom_line(aes(y = KB, color = "KB"), linetype = "solid", size = 1) +
+  labs(title = "Convergence Result", x = "Sample Size", y = "Average Relative Error") +
+  scale_color_manual(name = "Legend", values = c("SE" = "black", "MSE" = "blue", "KB" = "red")) +
+  theme_minimal()
+
+
+
+```
+
+```{r}
+df_1 <- data.frame(
+  "#samples" = grid,
+  "min" = mse_min_1,
+  "avg" = mse_avg_1,
+  "max" = mse_max_1,
+  "delta" = mse_delta_1
+)
+
+df_2 <- data.frame(
+  "#samples" = grid,
+  "min" = mse_min_2,
+  "avg" = mse_avg_2,
+  "max" = mse_max_2,
+  "delta" = mse_delta_2
+)
+
+df_3 <- data.frame(
+  "#samples" = grid,
+  "min" = mse_min_3,
+  "avg" = mse_avg_3,
+  "max" = mse_max_3,
+  "delta" = mse_delta_3
+)
+
+```
+
+
+```{r}
+write.table(df_1[c(1, 25, 50, 75, 100),], "Linear_subset_normal.txt", sep = "\t", row.names = FALSE)
+write.table(df_2[c(1, 25, 50, 75, 100),], "Quadratic_subset_normal.txt", sep = "\t", row.names = FALSE)
+write.table(df_3[c(1, 25, 50, 75, 100),], "KB_subset.txt_normal", sep = "\t", row.names = FALSE)
+```
+
+
+# Normal Distribution with Residual is N(0,1) with outliers N(10,1)
+```{r,include=FALSE}
+mse_avg_1 <- mse_min_1 <- mse_max_1 <- mse_delta_1 <- c()
+mse_avg_2 <- mse_min_2 <- mse_max_2 <- mse_delta_2 <- c()
+mse_avg_3 <- mse_min_3 <- mse_max_3 <- mse_delta_3 <- c()
+opt_sol <- c(0, 1)
+grid <-  c(seq(100, 10000, by = 100))
+
+for (N in grid){
+    mse_raw_1 = c()
+    mse_raw_2 = c()
+    mse_raw_3 = c()
+    for (s in 1:10){
+    set.seed(s)
+    e <- rnorm(N, mean=0, sd = 1)
+    #e_mean <- mean(e)
+    #alpha <- ecdf(e)(e_mean)
+    x <- rnorm(N, mean=0,sd=1)
+    w <- 1
+    b <- 0 
+    y <- w * x + b
+    y[x >= quantile(x, 0.97)] <- y[x >=quantile(x, 0.97)] + rnorm(N*0.03 , mean=10,sd=1)
+    # Building Design Matrices for Primal Problems
+    matrix_scenarios_body <- matrix(c(rep(1, times = N), x, y+e), ncol = 3, byrow = FALSE)
+    colnames(matrix_scenarios_body) = c('x1','x2','scenario_benchmark')
+
+
+    # Piecewise Linear Error
+    problem_name_l <- "problem_linear"
+    problem_statement_l <- sprintf("minimize
+        variable(super_err)
+        constraint: <= 0
+        pm_pen_g(0, matrix_scenarios)
+        -variable(super_err)
+        constraint: <= 0
+        pm_pen(0, matrix_scenarios)
+        -variable(super_err)
+        Solver: van")
+    problem_list_linear <- list()
+    problem_list_linear$problem_name <- problem_name_l
+    problem_list_linear$problem_statement <- problem_statement_l
+    problem_list_linear$matrix_scenarios <- matrix_scenarios_body
+
+    # Optimization Output
+    res_lin <- rpsg_solver(problem_list_linear)
+    output_list_linear <- rpsg_getsolution(res_lin)
+    coefs_lin <- output_list_linear$point_problem_1[2:3]
+
+    # Quadratic Error
+    problem_name_q <- "problem_quadratic"
+    
+    problem_statement_q <- sprintf("minimize
+        pm2_pen(0, matrix_scenarios)
+        pm2_pen_g(0, matrix_scenarios)
+        Solver: van")
+    problem_list_q <- list()
+    problem_list_q$problem_name <- problem_name_q
+    problem_list_q$problem_statement <- problem_statement_q
+    problem_list_q$matrix_scenarios <- matrix_scenarios_body
+    # Optimization Output
+    res_q <- rpsg_solver(problem_list_q)
+    output_list_q <- rpsg_getsolution(res_q)
+    coefs_q <- output_list_q$point_problem_1
+
+    # KB Error
+    problem_name_kb <- "problem_kb"
+
+    problem_statement_kb <- sprintf("minimize
+        kb_err(0.5, matrix_scenarios)
+        Solver: van")
+    problem_list_kb <- list()
+    problem_list_kb$problem_name <- problem_name_kb
+    problem_list_kb$problem_statement <- problem_statement_kb
+    problem_list_kb$matrix_scenarios <- matrix_scenarios_body
+
+    # Optimization Output
+    res_kb <- rpsg_solver(problem_list_kb)
+    output_list_kb <- rpsg_getsolution(res_kb)
+    coefs_kb <- output_list_kb$point_problem_1
+
+    mse_1 <- sqrt(sum((coefs_lin - opt_sol)^2)) / sqrt(sum(coefs_lin^2))
+    mse_raw_1 <- c(mse_raw_1, mse_1)
+    
+    mse_2 <- sqrt(sum((coefs_q - opt_sol)^2)) / sqrt(sum(coefs_q^2))
+    mse_raw_2 <- c(mse_raw_2, mse_2)
+    
+    mse_3 <- sqrt(sum((coefs_kb - opt_sol)^2)) / sqrt(sum(coefs_kb^2))
+    mse_raw_3 <- c(mse_raw_3, mse_3)
+    }
+  min_err_1 <- min(mse_raw_1)
+  max_err_1 <- max(mse_raw_1)
+  avg_err_1 <- mean(mse_raw_1)
+  delta_err_1 <- max_err_1 - min_err_1
+
+  min_err_2 <- min(mse_raw_2)
+  max_err_2 <- max(mse_raw_2)
+  avg_err_2 <- mean(mse_raw_2)
+  delta_err_2 <- max_err_2 - min_err_2
+
+  min_err_3 <- min(mse_raw_3)
+  max_err_3 <- max(mse_raw_3)
+  avg_err_3 <- mean(mse_raw_3)
+  delta_err_3 <- max_err_3 - min_err_3
+
+  mse_avg_1 <- c(mse_avg_1, avg_err_1)
+  mse_min_1 <- c(mse_min_1, min_err_1)
+  mse_max_1 <- c(mse_max_1, max_err_1)
+  mse_delta_1 <- c(mse_delta_1, delta_err_1)
+
+  mse_avg_2 <- c(mse_avg_2, avg_err_2)
+  mse_min_2 <- c(mse_min_2, min_err_2)
+  mse_max_2 <- c(mse_max_2, max_err_2)
+  mse_delta_2 <- c(mse_delta_2, delta_err_2)
+
+  mse_avg_3 <- c(mse_avg_3, avg_err_3)
+  mse_min_3 <- c(mse_min_3, min_err_3)
+  mse_max_3 <- c(mse_max_3, max_err_3)
+  mse_delta_3 <- c(mse_delta_3, delta_err_3)
+}
+```
+
+
+```{r}
+df <- data.frame(grid = grid, Linear = mse_avg_1, Quadratic = mse_avg_2, KB = mse_avg_3)
+
+ggplot(data = df, aes(x = grid)) +
+  geom_line(aes(y = Linear, color = "SE"), linetype = "solid", size = 1) +
+  geom_line(aes(y = Quadratic, color = "MSE"), linetype = "solid", size = 1) +
+  geom_line(aes(y = KB, color = "KB"), linetype = "solid", size = 1) +
+  labs(title = "Convergence Result", x = "Sample Size", y = "Average Relative Error") +
+  scale_color_manual(name = "Legend", values = c("SE" = "black", "MSE" = "blue", "KB" = "red")) +
+  theme_minimal()
+```
+
+
+```{r}
+df_1 <- data.frame(
+  "samples_size" = grid,
+  "min" = mse_min_1,
+  "avg" = mse_avg_1,
+  "max" = mse_max_1,
+  "delta" = mse_delta_1
+)
+
+df_2 <- data.frame(
+  "samples_size" = grid,
+  "min" = mse_min_2,
+  "avg" = mse_avg_2,
+  "max" = mse_max_2,
+  "delta" = mse_delta_2
+)
+
+df_3 <- data.frame(
+  "samples_size" = grid,
+  "min" = mse_min_3,
+  "avg" = mse_avg_3,
+  "max" = mse_max_3,
+  "delta" = mse_delta_3
+)
+```
+
+```{r}
+df_1[c(1,25,50,75,100),]
+df_2[c(1,25,50,75,100),]
+df_3[c(1,25,50,75,100),]
+```
+
+```{r}
+write.table(df_1[c(1, 25, 50, 75, 100),], "Linear_subset_outlier3.txt", sep = "\t", row.names = FALSE)
+write.table(df_2[c(1, 25, 50, 75, 100),], "Quadratic_subset_outlier3.txt", sep = "\t", row.names = FALSE)
+write.table(df_3[c(1, 25, 50, 75, 100),], "KB_subset_outlier3.txt", sep = "\t", row.names = FALSE)
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+##############################
+```{r}
+mse_avg_1 <- mse_min_1 <- mse_max_1 <- mse_delta_1 <- c()
+mse_avg_2 <- mse_min_2 <- mse_max_2 <- mse_delta_2 <- c()
+mse_avg_3 <- mse_min_3 <- mse_max_3 <- mse_delta_3 <- c()
+opt_sol <- c(0, 1)
+grid <-  seq(100,100000,by=1000)
+
+for (N in seq(100,100000,by=1000)){
+    mse_raw_1 = c()
+    mse_raw_2 = c()
+    mse_raw_3 = c()
+    for (s in 1:50){
+    set.seed(s)
+    e<-rsnorm(1000,mean=0,sd=1,xi=5)  # Negative Skewed Noise
+    x <- rnorm(N, mean = 0, sd = 1)
+    w <- 1
+    b <- 0
+    y <- w * x + b  # y = x
+
+    # Building Design Matrices for Primal Problems
+    matrix_scenarios_body <- matrix(c(rep(1, times = N), x, y + e), ncol = 3, byrow = FALSE)
+    colnames(matrix_scenarios_body) = c('x1','x2','scenario_benchmark')
+
+
+    # Piecewise Linear Error
+    problem_name_l <- "problem_linear"
+    problem_statement_l <- sprintf("minimize
+        variable(super_err)
+        constraint: <= 0
+        pm_pen_g(0, matrix_scenarios)
+        -variable(super_err)
+        constraint: <= 0
+        pm_pen(0, matrix_scenarios)
+        -variable(super_err)
+        Solver: van")
+    problem_list_linear <- list()
+    problem_list_linear$problem_name <- problem_name_l
+    problem_list_linear$problem_statement <- problem_statement_l
+    problem_list_linear$matrix_scenarios <- matrix_scenarios_body
+
+    # Optimization Output
+    res_lin <- rpsg_solver(problem_list_linear)
+    output_list_linear <- rpsg_getsolution(res_lin)
+    coefs_lin <- output_list_linear$point_problem_1[2:3]
+
+    # Quadratic Error
+    problem_name_q <- "problem_quadratic"
+    problem_statement_q <- sprintf("minimize
+        pm2_pen(0, matrix_scenarios)
+        pm2_pen_g(0, matrix_scenarios)
+        Solver: van")
+    problem_list_q <- list()
+    problem_list_q$problem_name <- problem_name_q
+    problem_list_q$problem_statement <- problem_statement_q
+    problem_list_q$matrix_scenarios <- matrix_scenarios_body
+    # Optimization Output
+    res_q <- rpsg_solver(problem_list_q)
+    output_list_q <- rpsg_getsolution(res_q)
+    coefs_q <- output_list_q$point_problem_1
+
+    # KB Error
+    problem_name_kb <- "problem_kb"
+    problem_statement_kb <- sprintf("minimize
+        kb_err(0.5, matrix_scenarios)
+        Solver: van")
+    problem_list_kb <- list()
+    problem_list_kb$problem_name <- problem_name_kb
+    problem_list_kb$problem_statement <- problem_statement_kb
+    problem_list_kb$matrix_scenarios <- matrix_scenarios_body
+
+    # Optimization Output
+    res_kb <- rpsg_solver(problem_list_kb)
+    output_list_kb <- rpsg_getsolution(res_kb)
+    coefs_kb <- output_list_kb$point_problem_1
+
+    mse_1 <- sqrt(sum((coefs_lin - opt_sol)^2)) / sqrt(sum(coefs_lin^2))
+    mse_raw_1 <- c(mse_raw_1, mse_1)
+    
+    mse_2 <- sqrt(sum((coefs_q - opt_sol)^2)) / sqrt(sum(coefs_q^2))
+    mse_raw_2 <- c(mse_raw_2, mse_2)
+    
+    mse_3 <- sqrt(sum((coefs_kb - opt_sol)^2)) / sqrt(sum(coefs_kb^2))
+    mse_raw_3 <- c(mse_raw_3, mse_3)
+    }
+  min_err_1 <- min(mse_raw_1)
+  max_err_1 <- max(mse_raw_1)
+  avg_err_1 <- mean(mse_raw_1)
+  delta_err_1 <- max_err_1 - min_err_1
+
+  min_err_2 <- min(mse_raw_2)
+  max_err_2 <- max(mse_raw_2)
+  avg_err_2 <- mean(mse_raw_2)
+  delta_err_2 <- max_err_2 - min_err_2
+
+  min_err_3 <- min(mse_raw_3)
+  max_err_3 <- max(mse_raw_3)
+  avg_err_3 <- mean(mse_raw_3)
+  delta_err_3 <- max_err_3 - min_err_3
+
+  mse_avg_1 <- c(mse_avg_1, avg_err_1)
+  mse_min_1 <- c(mse_min_1, min_err_1)
+  mse_max_1 <- c(mse_max_1, max_err_1)
+  mse_delta_1 <- c(mse_delta_1, delta_err_1)
+
+  mse_avg_2 <- c(mse_avg_2, avg_err_2)
+  mse_min_2 <- c(mse_min_2, min_err_2)
+  mse_max_2 <- c(mse_max_2, max_err_2)
+  mse_delta_2 <- c(mse_delta_2, delta_err_2)
+
+  mse_avg_3 <- c(mse_avg_3, avg_err_3)
+  mse_min_3 <- c(mse_min_3, min_err_3)
+  mse_max_3 <- c(mse_max_3, max_err_3)
+  mse_delta_3 <- c(mse_delta_3, delta_err_3)
+
+}
+```
+
+
+# Robustness
+```{r}
+set.seed(123)
+N <- 20
+x <- c(rnorm(N-1, mean = 0, sd = 1),3)
+w <- 1
+b <- 0
+e <- rnorm(N, mean = 0, sd = 1)
+y <- w * x + b + rnorm(N, mean = 0, sd = 1)
+y[20] <- 15
+
+df <- data.frame(x = x, y = y)
+plot(df$x, df$y, main = "Data with Outliers", xlab = "x", ylab = "y")
+
+```
+```{r}
+model <- lm(y ~ x, data = df)
+plot(df$x, df$y, main = "Linear Regression with Outliers", xlab = "x", ylab = "y")
+abline(model, col = "red", lwd = 2)
+model <- lm(y ~ x, data = df[1:19,])
+abline(model,col='blue',lwd=2)
+```
+```{r}
+set.seed(123)
+N <- 20
+x <- c(rnorm(N-1, mean = 0, sd = 1),3)
+w <- 1
+b <- 0
+e <- rnorm(N, mean = 0, sd = 1)
+y <- w * x + b + rnorm(N, mean = 0, sd = 1)
+y[20] <- 15
+
+df <- data.frame(x = x, y = y)
+```
+
+```{r}
+set.seed(123)
+N <- 100
+x <- rnorm(N)
+y <- 2 * x + rnorm(N)+rnorm(N, mean = 0, sd = 1)
+df <- data.frame(x = x, y = y)
+```
+
+
+```{r}
+slope <- 0
+intercept <-0 
+
+
+learning_rate <- 0.01
+iterations <- 1000
+
+Superexpectation_error_derivative <- function(y_pred, data) {
+  n <- length(data$y)
+  Dm <- numeric(n)
+  Dc <- numeric(n)
+
+  E1 <- mean(max(0, data$y - y_pred))
+  E2 <- mean(max(0, -data$y + y_pred))
+
+  if (E1 > E2) {
+    for (i in 1:n) {
+      if ((data$y[i] - y_pred[i]) > 0) {
+        Dm[i] <- -data$x[i]
+        Dc[i] <- -1
+      } else {
+        Dm[i] <- 0
+        Dc[i] <- 0
+      }
+    }
+  } else if (E1 < E2) {
+    for (i in 1:n) {
+      if ((data$y[i] - y_pred[i]) > 0) {
+        Dm[i] <- data$x[i]
+        Dc[i] <- 1
+      } else {
+        Dm[i] <- 0
+        Dc[i] <- 0
+      }
+    }
+  }
+
+  Dm_mean <- mean(Dm)
+  Dc_mean <- mean(Dc)
+
+  return(list(Dm = Dm_mean, Dc = Dc_mean))
+}
+
+
+
+for (i in 1:iterations) {
+
+  y_pred <- slope * df$x + intercept
+  
+  error_derivative <- Superexpectation_error_derivative(y_pred, df)
+  slope <- slope - learning_rate * error_derivative$Dm
+  intercept <- intercept - learning_rate * error_derivative$Dc
+
+}
+
+cat("Final Slope:", slope, "\n")
+cat("Final Intercept:", intercept, "\n")
+
+
+```
+```{r}
+plot(df$x, df$y, main = "Scatter Plot with Regression Line", xlab = "X", ylab = "Y")
+abline(a = intercept, b = slope, col = "red")
+model <- lm(y ~ x, data = df)
+abline(model, col = "blue", lwd = 2)
+```
+
+```{r}
+library(Deriv)
+
+error_function <- expression(max(mean(pmax(0, y - y_pred)), mean(pmax(0, -y + y_pred))))
+
+# Define the variables
+variables <- c("y_pred", "y")
+
+# Take the derivative
+derivative <- D(error_function, namevec = variables)
+
+# Print the derivative
+cat("Derivative:", derivative, "\n")
+
+
+```
+
+# Real World Stock Price Data
+```{r}
+library(quantmod)
+library(tidyverse)
+library(PSG)
+```
+
+
+```{r}
+stock_tickers <- c("AAPL", "MSFT", "NVDA", "TSM", "AVGO", "ORCL","ADBE", "ASML", "CSCO", "CRM", "LLY", "UNH", "NVO","JNJ", "MRK", "ABBV", "O", "V", "JPM", "MA", "BAC","HSBC", "WFC", "CAT", "UPS", "UNP", "HON", "GE", "BA", "DE", "AMZN", "TSLA", "HD", "TM", "GOOGL", "MCD", "NKE","PLD", "AMT", "EQIX")
+
+start_date <- as.Date("2013-01-01")
+end_date <- as.Date("2023-10-31")
+
+portfolio_value <- 2E+06
+portfolio_gamma <- 0.005
+total_cost <- portfolio_value * portfolio_gamma
+cat('total cost in my porfolio is:',total_cost)
+```
+
+```{r}
+stock_returns <- list()
+
+for (ticker in stock_tickers) {
+  getSymbols(ticker, from = start_date, to = end_date, src = 'yahoo')
+  daily_returns <- dailyReturn(Ad(get(ticker)),type='log')
+  stock_returns[[ticker]] <- daily_returns
+}
+getSymbols("^GSPC", from = start_date, to = end_date, src = 'yahoo')
+SPY_return <-dailyReturn(Ad(GSPC),type = 'log')
+stock_returns_matrix <- do.call(cbind, stock_returns)
+matrix_inmmax<- as.matrix(cbind(stock_returns_matrix, SPY_return))
+```
+```{r}
+matrix_inmmax <- matrix_inmmax/(portfolio_value * (1-portfolio_gamma))
+matrix_inmmax <- matrix_inmmax[-1,]
+```
+
+
+```{r}
+set.seed(123)
+colnames(matrix_inmmax) <- c("ksi0001","ksi0002","ksi0003","ksi0004","ksi0005","ksi0006","ksi0007","ksi0008","ksi0009","ksi00010","ksi0011","ksi0012","ksi0013","ksi0014","ksi0015","ksi0016","ksi0017","ksi0018","ksi0019","ksi0020","ksi0021","ksi0022","ksi0023","ksi0024","ksi0025","ksi0026","ksi0027","ksi0028","ksi0029","ksi0030","ksi0031","ksi0032","ksi0033","ksi0034","ksi0035","ksi0036","ksi0037","ksi0038","ksi0039","ksi0040","scenario_benchmark")
+rownames(matrix_inmmax) <- NULL
+
+
+matrix_ksi<- matrix(1,nrow=1,ncol=40)
+colnames(matrix_ksi) <- c("ksi0001","ksi0002","ksi0003","ksi0004","ksi0005","ksi0006","ksi0007","ksi0008","ksi0009","ksi00010","ksi0011","ksi0012","ksi0013","ksi0014","ksi0015","ksi0016","ksi0017","ksi0018","ksi0019","ksi0020","ksi0021","ksi0022","ksi0023","ksi0024","ksi0025","ksi0026","ksi0027","ksi0028","ksi0029","ksi0030","ksi0031","ksi0032","ksi0033","ksi0034","ksi0035","ksi0036","ksi0037","ksi0038","ksi0039","ksi0040")
+
+
+```
+
+```{r}
+matrix_ksibuy <- matrix(20000,nrow=1,ncol=40)
+colnames(matrix_ksibuy)<-c("ksi0001","ksi0002","ksi0003","ksi0004","ksi0005","ksi0006","ksi0007","ksi0008","ksi0009","ksi00010","ksi0011","ksi0012","ksi0013","ksi0014","ksi0015","ksi0016","ksi0017","ksi0018","ksi0019","ksi0020","ksi0021","ksi0022","ksi0023","ksi0024","ksi0025","ksi0026","ksi0027","ksi0028","ksi0029","ksi0030","ksi0031","ksi0032","ksi0033","ksi0034","ksi0035","ksi0036","ksi0037","ksi0038","ksi0039","ksi0040")
+```
+
+
+```{r}
+set.seed(123)
+random_values <- sample(0:100000, 30, replace = TRUE)
+scaling_factor <- portfolio_value / sum(random_values)
+adjusted_values <- random_values * scaling_factor
+sum(adjusted_values)
+
+matrix_ksipol <- matrix(c(rep(1, times = 40), adjusted_values,rep(0,time=10)), nrow = 2, ncol = 40, byrow = TRUE)
+
+colnames(matrix_ksipol)<-c("ksi0001","ksi0002","ksi0003","ksi0004","ksi0005","ksi0006","ksi0007","ksi0008","ksi0009","ksi00010","ksi0011","ksi0012","ksi0013","ksi0014","ksi0015","ksi0016","ksi0017","ksi0018","ksi0019","ksi0020","ksi0021","ksi0022","ksi0023","ksi0024","ksi0025","ksi0026","ksi0027","ksi0028","ksi0029","ksi0030","ksi0031","ksi0032","ksi0033","ksi0034","ksi0035","ksi0036","ksi0037","ksi0038","ksi0039","ksi0040")
+```
+
+
+```{r}
+problem_statement_SE <- sprintf("
+  minimize
+  variable(E)
+Constraint: <=0, linearize=1
+  pm_pen_g(0,matrix_inmmax)
+  -variable(E)
+Constraint: <=0, linearize=1
+  pm_pen(0,matrix_inmmax)
+  -variable(E)
+Constraint: <= 15
+  cardn_pos(0.01, matrix_ksi)
+  
+Constraint: <= 0
+  buyin_pos(0.01, matrix_ksibuy)
+  
+Constraint: <= 0.20E+07
+  linear(matrix_ksi)
+  +variable(trcost)
+  
+Constraint: <= 1E+04
+  variable(trcost)
+  
+Constraint: <= 0
+  -variable(trcost)
+  +0.01*polynom_abs(matrix_ksipol)
+  +100*cardn_pos(0.01, matrix_ksipol)
+  +100*cardn_neg(0.01, matrix_ksipol)
+Box: >= 0"
+)
+```
+
+```{r}
+problem_statement_ME <- sprintf("
+  minimize
+  meansquare_err(matrix_inmmax)
+  
+Constraint: <= 15
+  cardn_pos(0.01, matrix_ksi)
+  
+Constraint: <= 0
+  buyin_pos(0.01, matrix_ksibuy)
+  
+Constraint: <= 0.20E+07
+  linear(matrix_ksi)
+  +variable(trcost)
+  
+Constraint: <= 1E+04
+  variable(trcost)
+  
+Constraint: <= 0
+  -variable(trcost)
+  +0.01*polynom_abs(matrix_ksipol)
+  +100*cardn_pos(0.01, matrix_ksipol)
+  +100*cardn_neg(0.01, matrix_ksipol)
+Box: >= 0"
+)
+```
+
+
+```{r}
+problem_statement_KB <- sprintf("
+  minimize
+  kb_err(0.5,matrix_inmmax)
+  
+Constraint: <= 15
+  cardn_pos(0.01, matrix_ksi)
+  
+Constraint: <= 0
+  buyin_pos(0.01, matrix_ksibuy)
+  
+Constraint: <= 0.20E+07
+  linear(matrix_ksi)
+  +variable(trcost)
+  
+Constraint: <= 1E+04
+  variable(trcost)
+  
+Constraint: <= 0
+  -variable(trcost)
+  +0.01*polynom_abs(matrix_ksipol)
+  +100*cardn_pos(0.01, matrix_ksipol)
+  +100*cardn_neg(0.01, matrix_ksipol)
+Box: >= 0"
+)
+```
+
+
+```{r}
+problem.list_SE <- list()
+problem.list_ME <- list()
+problem.list_KB <- list()
+```
+
+```{r}
+problem.list_SE$problem_name= "problem_1"
+problem.list_SE$problem_statement <- problem_statement_SE
+problem.list_SE$matrix_ksi <- matrix_ksi
+problem.list_SE$matrix_inmmax <- matrix_inmmax
+problem.list_SE$matrix_ksibuy <- matrix_ksibuy
+problem.list_SE$matrix_ksipol <- matrix_ksipol
+
+
+problem.list_ME$problem_name= "problem_1"
+problem.list_ME$problem_statement <- problem_statement_ME
+problem.list_ME$matrix_ksi <- matrix_ksi
+problem.list_ME$matrix_inmmax <- matrix_inmmax
+problem.list_ME$matrix_ksibuy <- matrix_ksibuy
+problem.list_ME$matrix_ksipol <- matrix_ksipol
+
+problem.list_KB$problem_name= "problem_1"
+problem.list_KB$problem_statement <- problem_statement_KB
+problem.list_KB$matrix_ksi <- matrix_ksi
+problem.list_KB$matrix_inmmax <- matrix_inmmax
+problem.list_KB$matrix_ksibuy <- matrix_ksibuy
+problem.list_KB$matrix_ksipol <- matrix_ksipol
+```
+
+
+
+```{r}
+results_SE <- rpsg_solver(problem.list_SE)
+results_ME <- rpsg_solver(problem.list_ME)
+results_KB <- rpsg_solver(problem.list_KB)
+```
+
+
+```{r}
+output.list_SE <- rpsg_getsolution(results_SE)
+output.list_ME <- rpsg_getsolution(results_ME)
+output.list_KB <- rpsg_getsolution(results_KB)
+```
+
+```{r}
+output.list_SE$point_problem_1
+output.list_ME$point_problem_1
+output.list_KB$point_problem_1
+```
+
+```{r}
+X_SE<-output.list_SE$point_problem_1[-length(output.list_SE$point_problem_1)]
+X_SE<-X_SE[-1]
+X_ME<-output.list_ME$point_problem_1[-length(output.list_ME$point_problem_1)]
+X_KB<-output.list_KB$point_problem_1[-length(output.list_KB$point_problem_1)]
+```
+
+```{r}
+Weight_SE<-X_SE/(portfolio_value*(1-portfolio_gamma))
+Weight_ME<-X_ME/(portfolio_value*(1-portfolio_gamma))
+Weight_KB<-X_KB/(portfolio_value*(1-portfolio_gamma))
+```
+
+```{r}
+stock_returns_matrix<-stock_returns_matrix[-1,]
+overall_dailyrate_SE <- overall_dailyrate_ME<-overall_dailyrate_KB<-c()
+for (i in 1:nrow(stock_returns_matrix)){
+  x_SE<-sum(Weight_SE*stock_returns_matrix[i,])
+  x_ME<-sum(Weight_ME*stock_returns_matrix[i,])
+  x_KB<-sum(Weight_KB*stock_returns_matrix[i,])
+  overall_dailyrate_SE <- c(overall_dailyrate_SE,x_SE)
+  overall_dailyrate_ME <- c(overall_dailyrate_ME,x_ME)
+  overall_dailyrate_KB <- c(overall_dailyrate_KB,x_KB)
+}
+overall_dailyrate_SE<-exp(overall_dailyrate_SE)
+final_portfoilo_value_SE<-100*prod(overall_dailyrate_SE)
+
+overall_dailyrate_ME<-exp(overall_dailyrate_ME)
+final_portfoilo_value_ME<-100*prod(overall_dailyrate_ME)
+
+overall_dailyrate_KB<-exp(overall_dailyrate_KB)
+final_portfoilo_value_KB<-100*prod(overall_dailyrate_KB)
+```
+
+```{r}
+portfolio_value_over_time_SE <- c(100)
+for (i in 1:length(overall_dailyrate_SE)){
+  x<-portfolio_value_over_time_SE[i]*overall_dailyrate_SE[i]
+  portfolio_value_over_time_SE <- c(portfolio_value_over_time_SE,x)
+}
+#time_step <- 1:length(portfolio_value_over_time_SE)
+#plot(time_step,portfolio_value_over_time_SE)
+```
+
+```{r}
+portfolio_value_over_time_ME <- c(100)
+for (i in 1:length(overall_dailyrate_ME)){
+  x<-portfolio_value_over_time_ME[i]*overall_dailyrate_ME[i]
+  portfolio_value_over_time_ME <- c(portfolio_value_over_time_ME,x)
+}
+#time_step <- 1:length(portfolio_value_over_time_ME)
+```
+
+```{r}
+portfolio_value_over_time_KB <- c(100)
+for (i in 1:length(overall_dailyrate_KB)){
+  x<-portfolio_value_over_time_KB[i]*overall_dailyrate_KB[i]
+  portfolio_value_over_time_KB <- c(portfolio_value_over_time_KB,x)
+}
+```
+
+
+```{r}
+SPY_value_over_time<- c(100)
+SPY_return <- SPY_return[-1]
+SPY_return <- exp(SPY_return)
+for(i in (1:length(SPY_return))){
+  x <- SPY_value_over_time[i] * SPY_return[i]
+  SPY_value_over_time<-c(SPY_value_over_time,x)
+}
+cat('final Dow Jones Index value is:',SPY_value_over_time[length(SPY_value_over_time)])
+```
+
+```{r}
+time_step <- 1:length(SPY_value_over_time)
+#plot(time_step,SPY_value_over_time)
+```
+
+
+
+```{r}
+plot(time_step,SPY_value_over_time, type = "l", col = "blue", xlab = "Time Step", ylab = "Portfolio Value", main = "Replicate Portfolio VS. SPY500 Index")
+lines(time_step,portfolio_value_over_time_SE,col='red')
+lines(time_step,portfolio_value_over_time_ME,col='black')
+lines(time_step,portfolio_value_over_time_KB,col='green')
+legend("topleft", legend = c("SPY500 Index", "Replicate Portfolio_SE","Replicate Portfolio_ME","Replicate Portfolio_KB"), col = c("blue", "red","black","green"), lty = 1)
+```
